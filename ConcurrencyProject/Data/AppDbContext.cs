@@ -14,6 +14,7 @@ namespace ConcurrencyProject.Data
         {
         }
 
-        public DbSet<Book> Books { get; set; }
+        public DbSet<BankAccount> BankAccounts { get; set; }
+        public DbSet<User> Users{ get; set; }
     }
 }
