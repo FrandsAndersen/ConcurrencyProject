@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ConcurrencyProject.Data;
 using ConcurrencyProject.Models;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace ConcurrencyProject.Controllers
 {
@@ -47,65 +48,74 @@ namespace ConcurrencyProject.Controllers
         // POST: api/BankAccounts
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPost]
-        public async Task<ActionResult<BankAccount>> PostBankAccount(BankAccount bankAccount)
+        public async Task<ActionResult<String>> PostBankAccount(int newBalance, int oldBalance)
         {
-            _context.BankAccounts.Add(bankAccount);
-            await _context.SaveChangesAsync();
+            var bankAccount = _context.BankAccounts.First();
 
-            return CreatedAtAction("GetBankAccount", new { id = bankAccount.BankAccountId }, bankAccount);
+            bankAccount.UpdateBalance(_context,newBalance,oldBalance);
+            var returnMessage = "";
+            try
+            {
+                
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException e)
+            {
+                var errorEntry = e.Entries.Single();
+                returnMessage = DiagnoseBalanceConcurrencyConflict(errorEntry);
+            }
+
+            return returnMessage;
+        }
+
+        private string DiagnoseBalanceConcurrencyConflict(EntityEntry errorEntry)
+        {
+            var bankAccount = errorEntry.Entity as BankAccount;
+            if (bankAccount == null)
+            {
+                throw new NotSupportedException("Unknown conflict revolving: " + errorEntry.Metadata.Name);
+            }
+
+            var dbEntity = _context.BankAccounts.AsNoTracking()
+                .SingleOrDefault(b => b.BankAccountId == bankAccount.BankAccountId);
+            if (dbEntity == null)
+            {
+                return "The bankaccount with name: " + bankAccount.AccountName + " was deleted by another user.... Here are your available actions: .......";
+            }
+            else
+            {
+                return "The bankaccount with name: " + bankAccount.AccountName + " has the following balance: " + dbEntity.Balance + 
+                       ". You expected the balance to be: " + bankAccount.Balance + "! Here are your options for handling this disconnected concurrency: ......";
+            }
         }
 
         [HttpPut("{triggerConcurrency}")]
         public async Task<IActionResult> PutBankAccountTriggerConcurrency(bool triggerConcurrency)
         {
-            // The While loop runs until the function is successful
-            // Or 3 exceptions has been thrown
-            var success = false;
-            var retries = 3;
-            while (!success)
+            try
             {
-                try
+                var account = _context.BankAccounts.First();
+                
+                // Updating the same Entity twice to trigger exception
+                if (triggerConcurrency)
                 {
-                    var account = _context.BankAccounts.First();
-                    
-                    // Updating the same Entity twice to trigger exception
-                    if (triggerConcurrency)
-                    {
-                        System.Diagnostics.Debug.WriteLine("Making concurrent update of accountId: " + account.BankAccountId);
+                    System.Diagnostics.Debug.WriteLine("Making concurrent update of accountId: " + account.BankAccountId);
 
-                        await _context.Database.ExecuteSqlRawAsync(
-                            "UPDATE dbo.BankAccounts SET Balance = @p0 " +
-                            "WHERE BankAccountId = @p1",
-                            account.Balance * 2, account.BankAccountId);
-                    }
-
-                    //account.Balance = account.Balance - 2;
-                    account.Balance = 75;
-                    await _context.SaveChangesAsync();
-
-                    // If this is reached everything was successful
-                    success = true;
+                    await _context.Database.ExecuteSqlRawAsync(
+                        "UPDATE dbo.BankAccounts SET Balance = @p0 " +
+                        "WHERE BankAccountId = @p1",
+                        account.Balance * 2, account.BankAccountId);
                 }
-                catch (DbUpdateConcurrencyException e)
-                {
-                    // If the exception is a concurrency exception --> Try again
-                    if (retries > 0)
-                    {
-                        // A Handle Concurrency method could be put here
-                        // But in this case a simple retry will suffice
-                        System.Diagnostics.Debug.WriteLine("Concurrency Exception, Retrying! Retries left: " + retries + " Current error: " + e.Message.Substring(0,30) + "...");
-                        retries--;
-                        Thread.Sleep(150);
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine(e);
-                        throw;
-                    }
-                    success = false;
-                }
+
+                account.Balance = -2;
+                await _context.SaveChangesAsync();
+
             }
-
+            catch (DbUpdateConcurrencyException e)
+            {
+                    System.Diagnostics.Debug.WriteLine(e);
+                    throw;
+            }
             return NoContent();
         }
 

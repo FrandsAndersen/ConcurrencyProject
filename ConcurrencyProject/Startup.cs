@@ -36,7 +36,14 @@ namespace ConcurrencyProject
             });
 
             services.AddDbContext<AppDbContext>(options =>
-                    options.UseSqlServer(Configuration.GetConnectionString("SQLServerConnection")));
+                    options.UseSqlServer(Configuration.GetConnectionString("SQLServerConnection"),
+                    sqlServerOptionsAction: sqlOptions =>
+                    {
+                        sqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 20,
+                            maxRetryDelay: TimeSpan.FromMilliseconds(150),
+                            errorNumbersToAdd: null);
+                    }));    
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
